@@ -54,6 +54,23 @@ type UserInterest struct {
 // TableName 指定兴趣标签表名。
 func (UserInterest) TableName() string { return "user_interests" }
 
+// Friendship 搭子/好友关系表 (广场陌生人社交建立的关系)。
+//
+// 与 UserRelation (亲子绑定) 并列: 二者任一存在即可聊天。
+// 为保证唯一性, UserAID 恒为较小的用户 ID, UserBID 恒为较大的用户 ID。
+type Friendship struct {
+	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserAID   uint64    `gorm:"uniqueIndex:idx_friend_pair;not null;comment:较小的用户ID" json:"user_a_id"`
+	UserBID   uint64    `gorm:"uniqueIndex:idx_friend_pair;not null;comment:较大的用户ID" json:"user_b_id"`
+	Source    string    `gorm:"type:varchar(16);default:'square';comment:来源:square/other" json:"source"`
+	Status    int       `gorm:"type:smallint;default:1;comment:1=有效,0=已解除" json:"status"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// TableName 指定好友关系表名。
+func (Friendship) TableName() string { return "friendships" }
+
 // ==================== 设备状态监控 ====================
 
 // DeviceStatusLog 老人端每日上报的设备状态数据 (步数、电量、屏幕使用)。

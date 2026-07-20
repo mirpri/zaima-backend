@@ -43,6 +43,7 @@ func SetupTestDB() *gorm.DB {
 		&model.User{},
 		&model.UserRelation{},
 		&model.UserInterest{},
+		&model.Friendship{},
 		&model.DeviceStatusLog{},
 		&model.MonthlyReport{},
 		&model.ChatMessage{},
@@ -80,6 +81,10 @@ func SetupTestConfig() {
 			Secret:      TestSecret,
 			ExpireHours: 24,
 		},
+		Storage: config.StorageConfig{
+			PublicBaseURL: "https://cdn.zaima.test",
+			MaxSizeMB:     10,
+		},
 		Weather: config.WeatherConfig{
 			CacheTTLHrs: 1,
 		},
@@ -111,6 +116,7 @@ func CleanDB() {
 	database.DB.Exec("DELETE FROM users")
 	database.DB.Exec("DELETE FROM user_relations")
 	database.DB.Exec("DELETE FROM user_interests")
+	database.DB.Exec("DELETE FROM friendships")
 	database.DB.Exec("DELETE FROM device_status_logs")
 	database.DB.Exec("DELETE FROM monthly_reports")
 	database.DB.Exec("DELETE FROM chat_messages")

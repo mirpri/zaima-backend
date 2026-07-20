@@ -12,6 +12,7 @@ import (
 
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
+	"zaima-backend/internal/pkg/perm"
 	"zaima-backend/internal/pkg/response"
 )
 
@@ -30,6 +31,11 @@ type PublishBubbleReq struct {
 // MatchConfirmReq 确认匹配请求。
 type MatchConfirmReq struct {
 	BubbleID uint64 `json:"bubble_id" binding:"required"`
+}
+
+// StartChatReq 发起搭子聊天请求。
+type StartChatReq struct {
+	PeerID uint64 `json:"peer_id" binding:"required"` // 想结识的广场用户ID
 }
 
 // ==================== 响应体定义 ====================
@@ -63,9 +69,9 @@ func PublishBubble(c *gin.Context) {
 	var user model.User
 	database.DB.First(&user, userID)
 
-	// 【安全】URL 白名单校验，防止 SSRF
-	if !isValidOSSURL(req.VoiceURL) {
-		response.BadRequest(c, "语音 URL 不合法，仅允许 OSS 地址")
+	// 【安全】URL 校验，防止 SSRF / 任意外链
+	if !isValidMediaURL(req.VoiceURL) {
+		response.BadRequest(c, "语音 URL 不合法，请使用本平台上传的文件地址")
 		return
 	}
 
@@ -216,10 +222,65 @@ func MatchConfirm(c *gin.Context) {
 	database.RDB.ZRem(ctx, "square:geo", memberKey)
 	database.RDB.Del(ctx, fmt.Sprintf("square:ttl:%d", bubble.ID))
 
-	// TODO: 通过 WebSocket 通知其他正在和发布者聊天的用户：
-	// 发送 { type: "match_ended", bubble_id: xxx, message: "对方已找到玩伴，聊天结束" }
+	// 在线通知发布者本人：气泡已结束 (前端可据此更新UI)
+	notify(userID, "match_ended", gin.H{"bubble_id": bubble.ID})
 
 	response.OKWithMsg(c, "匹配成功，气泡已消失", nil)
+}
+
+// SquareStartChat 在广场发起搭子聊天：建立好友关系，允许双方开始对话。
+// POST /api/v1/square/start-chat
+//
+// 这是陌生人社交的入口——广场上没有亲子绑定，通过此接口建立 Friendship 后才可聊天。
+func SquareStartChat(c *gin.Context) {
+	userID := c.GetUint64("user_id")
+
+	var req StartChatReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "缺少对方用户ID")
+		return
+	}
+	if req.PeerID == userID {
+		response.Fail(c, 2003, "不能和自己交朋友")
+		return
+	}
+
+	var peer model.User
+	if err := database.DB.First(&peer, req.PeerID).Error; err != nil {
+		response.Fail(c, 2004, "用户不存在")
+		return
+	}
+
+	// 建立/激活好友关系 (幂等)
+	if err := perm.EnsureFriendship(database.DB, userID, req.PeerID, "square"); err != nil {
+		response.ServerError(c, "建立搭子关系失败")
+		return
+	}
+
+	// 首次结识时插入一条系统消息，作为会话起点 (避免重复插入)
+	var msgCount int64
+	database.DB.Model(&model.ChatMessage{}).Where(
+		"(sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)",
+		userID, req.PeerID, req.PeerID, userID,
+	).Count(&msgCount)
+	if msgCount == 0 {
+		database.DB.Create(&model.ChatMessage{
+			SenderID:   userID,
+			ReceiverID: req.PeerID,
+			MsgType:    "system",
+			Content:    "你们成为搭子啦，打个招呼吧~",
+			IsRead:     true,
+		})
+	}
+
+	// 在线通知对方：多了一个新搭子
+	notify(req.PeerID, "new_friend", gin.H{"peer_id": userID})
+
+	response.OK(c, gin.H{
+		"peer_id":     peer.ID,
+		"peer_name":   peer.Nickname,
+		"peer_avatar": peer.AvatarURL,
+	})
 }
 
 // GetSquareUsers 获取广场用户列表（带兴趣标签）。

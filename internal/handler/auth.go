@@ -149,8 +149,12 @@ func notifyYouthStrangeDevice(elderID uint64, newDeviceID string) {
 	var relations []model.UserRelation
 	database.DB.Where("elder_id = ? AND status = 1", elderID).Find(&relations)
 	for _, rel := range relations {
-		// TODO: 通过 WebSocket 或推送服务发送通知给 rel.YouthID
 		log.Printf("[auth] 陌生设备告警: 老人 %d 从设备 %s 登录, 通知年轻人 %d",
 			elderID, newDeviceID, rel.YouthID)
+		notify(rel.YouthID, "stranger_device", gin.H{
+			"elder_id":  elderID,
+			"device_id": newDeviceID,
+			"message":   "检测到长辈从新设备登录，请留意安全",
+		})
 	}
 }

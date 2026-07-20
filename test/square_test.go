@@ -29,7 +29,7 @@ func TestPublishBubble_Success(t *testing.T) {
 	token := GetTestToken(uid, 1)
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"voice_url":    "https://oss.example.com/voice1.mp3",
+		"voice_url":    "https://cdn.zaima.test/files/voice1.mp3",
 		"interest_tag": "广场舞",
 		"province":     "湖北",
 		"city":         "武汉",

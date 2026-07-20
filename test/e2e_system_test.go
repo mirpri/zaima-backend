@@ -18,12 +18,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"zaima-backend/internal/config"
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
 )
@@ -126,7 +128,7 @@ func TestE2E_ElderOnboarding(t *testing.T) {
 
 	// Step 4: 发布广场气泡
 	w = e2eRequest(r, "POST", "/api/v1/square/publish", elderToken, map[string]interface{}{
-		"voice_url":    "https://oss.example.com/elder_voice.mp3",
+		"voice_url":    "https://cdn.zaima.test/files/elder_voice.mp3",
 		"interest_tag": "广场舞",
 		"province":     "湖北",
 		"city":         "武汉",
@@ -294,7 +296,7 @@ func TestE2E_SquareMatchmaking(t *testing.T) {
 	})
 
 	w := e2eRequest(r, "POST", "/api/v1/square/publish", tokenA, map[string]interface{}{
-		"voice_url":    "https://oss.example.com/taichi.mp3",
+		"voice_url":    "https://cdn.zaima.test/files/taichi.mp3",
 		"interest_tag": "太极拳",
 		"province":     "湖北",
 		"city":         "武汉",
@@ -405,6 +407,19 @@ func TestE2E_DeviceMonitoringFlow(t *testing.T) {
 // 首次请求 -> 第二次请求命中缓存 -> 验证 source 字段值变化。
 func TestE2E_WeatherCacheConsistency(t *testing.T) {
 	r := SetupTestRouter()
+
+	// 启动本地天气源 (模拟 Open-Meteo 的 geocoding 与 forecast)，保证测试离线可跑
+	weatherSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(req.URL.Path, "/search") {
+			_, _ = w.Write([]byte(`{"results":[{"latitude":39.9,"longitude":116.4,"name":"北京"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"current":{"temperature_2m":12.3,"relative_humidity_2m":55,"weather_code":2,"wind_direction_10m":90}}`))
+	}))
+	defer weatherSrv.Close()
+	config.AppConfig.Weather.BaseURL = weatherSrv.URL
+	config.AppConfig.Weather.GeoURL = weatherSrv.URL
 
 	_, token := e2eLogin(t, r, "13700010000", 1)
 

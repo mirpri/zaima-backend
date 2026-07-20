@@ -39,6 +39,7 @@ func InitPostgres(cfg *config.DatabaseConfig) {
 		&model.User{},
 		&model.UserRelation{},
 		&model.UserInterest{},
+		&model.Friendship{},
 		&model.DeviceStatusLog{},
 		&model.MonthlyReport{},
 		&model.ChatMessage{},

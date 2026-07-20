@@ -210,30 +210,34 @@
 
 ---
 
-## 5. 文件与多媒体服务 (OSS)
+## 5. 文件与多媒体服务 (自建存储)
 
-### 5.1 获取 OSS 上传授权令牌 (STS 直传)
-- **URL**: `/oss/token`
-- **Method**: `GET`
+> 已由第三方 OSS 直传改为**后端自建文件存储**：前端直接把文件 POST 到 `/upload`，服务端存本地磁盘并返回可访问 URL。头像/录音等媒体地址统一走本平台域名。
+
+### 5.1 上传文件 (头像 / 录音)
+- **URL**: `/upload`
+- **Method**: `POST`
 - **鉴权**: 需要
-- **说明**: 获取直传授权，前端通过返回的凭证直接上传文件到 OSS，避免文件流量经过服务端。
+- **Body**: `multipart/form-data`，字段名 `file`（图片或音频，默认上限 10MB）
 - **Response**:
   ```json
   {
     "code": 0,
     "message": "success",
     "data": {
-      "access_key_id": "xxx",
-      "access_key_secret": "xxx",
-      "bucket_name": "zaima",
-      "endpoint": "https://zaima.oss.aliyuncs.com",
-      "expiration": "2026-03-05T10:00:00Z",
-      "dir": "uploads/users/123/",
-      "signature": "xxx",
-      "policy": "xxx"
+      "url": "https://zaima.example.com/files/uploads/users/123/ab12cd.png",
+      "path": "/files/uploads/users/123/ab12cd.png",
+      "mime": "image/png",
+      "size": 20480
     }
   }
   ```
+- **说明**: 返回的 `url` 可直接用于 `PUT /user/profile` 的 `avatar_url` 或 `POST /square/publish` 的 `voice_url`。
+
+### 5.2 访问已上传文件
+- **URL**: `/files/*`（注意：无 `/api/v1` 前缀，位于根路径）
+- **Method**: `GET`
+- **说明**: 静态返回已上传的文件，含路径穿越防护。
 
 ---
 
@@ -271,8 +275,22 @@
   ```
 - **说明**: 
   - 发起与对方的第一次聊天
-  - 前置条件：必须存在绑定关系（status=1）
+  - 前置条件：存在**亲子绑定**或**广场搭子**关系（陌生人需先调 `/square/start-chat`）
   - 返回状态：`created` (新建) 或 `existing` (已存在)
+
+### 7.1.1 发送消息 (REST)
+- **URL**: `/chat/send`
+- **Method**: `POST`
+- **Body**:
+  ```json
+  {
+    "receiver_id": 456,
+    "content": "你好呀",       // 文本内容，或语音/图片的文件 URL
+    "msg_type": "text",        // text/voice/image，默认 text
+    "temp_id": "c-1"           // 可选，客户端本地临时ID，用于回执去重
+  }
+  ```
+- **说明**: 与 WebSocket 发送等价（落库 + 在线投递），供不便维持长连接的场景使用。`voice`/`image` 类型的 `content` 必须是本平台上传的文件地址。
 
 ### 7.2 获取会话列表 (首屏)
 - **URL**: `/chat/sessions?keyword=xxx`
@@ -291,9 +309,34 @@
 - **Method**: `POST`
 - **说明**: 结合最近的聊天上下文（通过大模型或规则引擎）分析，返回建议的破冰回复。
 
-### 7.5 发送端语音转文字 (长辈端 STT)
-- **URL**: `/chat/stt`
+> 语音转文字 (STT) 接口已移除：按当前规划暂不做语音转写，长辈录音以 `voice` 消息直接发送、由对方收听。
+
+---
+
+## 8. 广场发起搭子聊天
+
+### 8.1 发起搭子聊天
+- **URL**: `/square/start-chat`
 - **Method**: `POST`
-- **Body Header**: `Content-Type: application/x-www-form-urlencoded`
-  - `voice_url=https://zaima.oss.aliyuncs.com/voice.mp3` // ⚠️ 必须为合法的 HTTPS OSS 链接
-- **说明**: 用于长辈滑动手势录音上传到 OSS 后，提交给服务端识别为文字后发送。
+- **鉴权**: 需要
+- **Body**:
+  ```json
+  { "peer_id": 456 }
+  ```
+- **说明**: 广场是陌生人社交，双方无亲子绑定。调用此接口会建立**搭子(好友)关系**并写入一条系统起始消息，之后即可通过 `/chat/send` 或 WebSocket 聊天。幂等，可重复调用。
+
+---
+
+## 9. WebSocket 实时事件
+
+除聊天消息 (`type: chat` / `ack`) 外，服务端会在用户在线时推送以下通用事件（统一格式 `{ "type": "<事件名>", "data": {...}, "timestamp": 1710000000000 }`）：
+
+| 事件 (type) | 触发时机 | data 关键字段 |
+|---|---|---|
+| `bind_request` | 收到新的亲子绑定请求 | `relation_id`, `initiator_id` |
+| `bind_confirmed` | 自己发起的绑定被对方确认 | `relation_id` |
+| `new_friend` | 有人在广场向你发起搭子 | `peer_id` |
+| `match_ended` | 自己的广场气泡匹配结束 | `bubble_id` |
+| `stranger_device` | 绑定的长辈从陌生设备登录 | `elder_id`, `device_id` |
+
+> 当前仅在线推送：用户离线时不会收到上述事件与消息，重新上线后可通过 `/chat/history?since_id=` 增量补齐聊天消息。

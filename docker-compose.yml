@@ -1,6 +1,9 @@
 # =============================================================
-# Docker Compose: "在吗" APP 后端本地测试环境
+# Docker Compose: "在吗" APP 后端
 # 一键拉起：PostgreSQL + Redis + Go 后端服务
+#
+# 生产部署：在本目录放一个 .env 文件覆盖下列变量 (compose 会自动读取)。
+# 未提供 .env 时使用 :- 后的默认值 (仅供本地/开发)。详见 DEPLOY.md。
 # =============================================================
 
 services:
@@ -10,7 +13,7 @@ services:
     container_name: zaima-postgres
     environment:
       POSTGRES_USER: zaima
-      POSTGRES_PASSWORD: zaima_dev_2026
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zaima_dev_2026}
       POSTGRES_DB: zaima
     ports:
       - "5432:5432"
@@ -42,6 +45,15 @@ services:
     container_name: zaima-api
     ports:
       - "8080:8080"
+    environment:
+      # ZAIMA_* 前缀会覆盖 config.docker.yaml 中的同名配置项
+      ZAIMA_SERVER_MODE: ${ZAIMA_SERVER_MODE:-debug}
+      ZAIMA_JWT_SECRET: ${ZAIMA_JWT_SECRET:-zaima-jwt-secret-change-in-production}
+      ZAIMA_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-zaima_dev_2026}
+      ZAIMA_LLM_API_KEY: ${ZAIMA_LLM_API_KEY:-}
+      ZAIMA_STORAGE_PUBLIC_BASE_URL: ${ZAIMA_STORAGE_PUBLIC_BASE_URL:-}
+    volumes:
+      - uploads:/app/data/uploads   # 自建文件存储持久化 (头像/录音)
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,3 +63,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:

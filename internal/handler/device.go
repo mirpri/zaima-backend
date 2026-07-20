@@ -2,12 +2,15 @@
 package handler
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
+	"zaima-backend/internal/pkg/llm"
 	"zaima-backend/internal/pkg/response"
 )
 
@@ -104,8 +107,8 @@ func GetDailyInsight(c *gin.Context) {
 
 	today := logs[0]
 
-	// TODO: 调用 LLM 接口生成个性化建议 (当前使用规则引擎兜底)
-	suggestion := generateFallbackSuggestion(today)
+	// 优先 LLM 生成个性化关切建议，失败/未配置回退规则引擎
+	suggestion := generateInsightSuggestion(c.Request.Context(), today, relation.Remark)
 
 	response.OK(c, gin.H{
 		"today":      today,
@@ -151,6 +154,27 @@ func GetMonthlyReport(c *gin.Context) {
 	}
 
 	response.OK(c, report)
+}
+
+// generateInsightSuggestion 调用 LLM 结合当日设备数据生成关切建议，失败回退规则引擎。
+func generateInsightSuggestion(ctx context.Context, log model.DeviceStatusLog, remark string) string {
+	who := remark
+	if who == "" {
+		who = "长辈"
+	}
+	prompt := fmt.Sprintf(
+		"你在帮子女解读父母(%s)当天的手机使用与活动数据，用一句话(不超过40字)给出温暖、可行动的关切建议。"+
+			"数据：步数%d，屏幕使用%d分钟，解锁%d次，电量%d%%。只输出建议本身。",
+		who, log.Steps, log.ScreenUsageMins, log.ScreenUnlocks, log.BatteryLevel,
+	)
+	out, err := llm.Chat(ctx, []llm.Message{
+		{Role: "system", Content: "你是一个关注老人健康的家庭助手。"},
+		{Role: "user", Content: prompt},
+	})
+	if err != nil || out == "" {
+		return generateFallbackSuggestion(log)
+	}
+	return out
 }
 
 // generateFallbackSuggestion 当 LLM 不可用时的兜底建议生成 (基于规则)。
