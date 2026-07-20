@@ -13,7 +13,6 @@
 package test
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -284,21 +283,4 @@ func TestAIReply_NoMessages(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	// IDOR 防护先于消息检查, 无绑定关系返回 403
 	assert.Contains(t, w.Body.String(), "403")
-}
-
-// TestSTT_Success 验证 STT 接口调用。
-func TestSTT_Success(t *testing.T) {
-	r := SetupTestRouter()
-	uid := SeedElderUser(database.DB)
-	token := GetTestToken(uid, 1)
-
-	body := bytes.NewBufferString("voice_url=https://oss/test.mp3")
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/chat/stt", body)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Authorization", "Bearer "+token)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "text")
 }

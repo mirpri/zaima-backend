@@ -25,11 +25,15 @@ RUN apk --no-cache add ca-certificates tzdata && \
 
 # 【安全】以非 root 用户运行
 RUN adduser -D -u 1000 appuser
-USER appuser
 
 WORKDIR /app
 COPY --from=builder --chown=appuser:appuser /app/zaima-server .
 COPY --from=builder --chown=appuser:appuser /app/configs ./configs
+
+# 自建文件存储目录 (供命名卷挂载, 首次创建卷时继承此属主)
+RUN mkdir -p /app/data/uploads && chown -R appuser:appuser /app/data
+
+USER appuser
 
 EXPOSE 8080
 

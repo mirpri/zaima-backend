@@ -46,10 +46,23 @@ func JWTAuth() gin.HandlerFunc {
 	}
 }
 
-// CORS 跨域中间件，允许所有来源访问 (开发阶段)。
+// CORS 跨域中间件。
+//
+// 允许来源由配置 server.allow_origins 决定：
+//   - 为空 → 允许所有来源 "*" (开发默认)
+//   - 配置了白名单 → 仅回显命中白名单的 Origin (生产推荐)
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		allowed := allowedOrigins()
+		origin := c.GetHeader("Origin")
+
+		if len(allowed) == 0 {
+			c.Header("Access-Control-Allow-Origin", "*")
+		} else if origin != "" && originAllowed(origin, allowed) {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		}
+
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
 		if c.Request.Method == "OPTIONS" {
@@ -58,4 +71,20 @@ func CORS() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func allowedOrigins() []string {
+	if config.AppConfig == nil {
+		return nil
+	}
+	return config.AppConfig.Server.AllowOrigins
+}
+
+func originAllowed(origin string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == "*" || strings.EqualFold(a, origin) {
+			return true
+		}
+	}
+	return false
 }

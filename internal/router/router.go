@@ -45,13 +45,17 @@ import (
 func SetupRouter(hub *ws.Hub) *gin.Engine {
 	r := gin.Default()
 
+	// 注入实时通知器，供 handler 层在线推送使用
+	handler.Notifier = hub
+
 	// 全局中间件
 	r.Use(middleware.CORS())
 
-	// 健康检查
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok", "service": "zaima-backend"})
-	})
+	// 健康检查 (含依赖探活)
+	r.GET("/health", handler.HealthCheck)
+
+	// 自建文件存储静态访问: GET /files/*
+	r.GET("/files/*filepath", handler.ServeFile)
 
 	// ========== API v1 ==========
 	v1 := r.Group("/api/v1")
@@ -94,6 +98,7 @@ func SetupRouter(hub *ws.Hub) *gin.Engine {
 		square.POST("/publish", handler.PublishBubble)      // 发布气泡
 		square.GET("/bubbles", handler.GetBubbles)          // 获取气泡列表
 		square.GET("/users", handler.GetSquareUsers)        // 获取广场用户列表
+		square.POST("/start-chat", handler.SquareStartChat) // 发起搭子聊天 (建立好友关系)
 		square.POST("/match-confirm", handler.MatchConfirm) // 确认匹配
 	}
 
@@ -110,18 +115,15 @@ func SetupRouter(hub *ws.Hub) *gin.Engine {
 	// --- 聊天 REST 模块 ---
 	chat := authorized.Group("/chat")
 	{
-		chat.POST("/create", handler.CreateChat)    // 创建聊天（发起第一次对话）
+		chat.POST("/create", handler.CreateChat)       // 创建聊天（发起第一次对话）
+		chat.POST("/send", handler.SendMessage)        // 发送消息 (REST，落库+在线投递)
 		chat.GET("/sessions", handler.GetChatSessions) // 会话列表
 		chat.GET("/history", handler.GetChatHistory)   // 聊天历史
 		chat.POST("/ai-suggest", handler.AIReply)      // AI回复建议
-		chat.POST("/stt", handler.STTConvert)          // 语音转文字
 	}
 
-	// --- OSS 文件上传授权 ---
-	oss := authorized.Group("/oss")
-	{
-		oss.GET("/token", handler.GetOSSToken) // 获取 OSS 上传授权令牌
-	}
+	// --- 自建文件上传 ---
+	authorized.POST("/upload", handler.UploadFile) // 上传头像/录音等媒体文件
 
 	return r
 }

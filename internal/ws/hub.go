@@ -18,6 +18,7 @@ import (
 
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
+	"zaima-backend/internal/pkg/perm"
 )
 
 // ==================== 消息协议 ====================
@@ -207,49 +208,23 @@ func (h *Hub) handleMessage(msg WSMessage) {
 
 // handleChatMessage 处理聊天消息：鉴权 + 入库 + 投递。
 func (h *Hub) handleChatMessage(msg WSMessage) {
-	// 【安全】校验发送者与接收者之间是否存在合法绑定关系
+	// 【安全】校验发送者与接收者之间是否存在合法关系 (亲子绑定或搭子好友)
 	if msg.ReceiverID == 0 {
 		log.Printf("[ws] 消息被拒: receiver_id 为空")
 		return
 	}
-	var relCount int64
-	database.DB.Model(&model.UserRelation{}).Where(
-		"status = 1 AND ((elder_id = ? AND youth_id = ?) OR (elder_id = ? AND youth_id = ?))",
-		msg.SenderID, msg.ReceiverID, msg.ReceiverID, msg.SenderID,
-	).Count(&relCount)
-	if relCount == 0 {
-		log.Printf("[ws] 消息被拒: 用户 %d 与 %d 无绑定关系", msg.SenderID, msg.ReceiverID)
+	if !perm.CanChat(database.DB, msg.SenderID, msg.ReceiverID) {
+		log.Printf("[ws] 消息被拒: 用户 %d 与 %d 无聊天关系", msg.SenderID, msg.ReceiverID)
 		return
 	}
 
-	// 1. 持久化到 PostgreSQL
-	chatMsg := model.ChatMessage{
-		SenderID:   msg.SenderID,
-		ReceiverID: msg.ReceiverID,
-		MsgType:    msg.MsgType,
-		Content:    msg.Content,
-	}
-	database.DB.Create(&chatMsg)
-
-	// 填充服务端生成的消息 ID
-	msg.MessageID = chatMsg.ID
-
-	msgBytes, _ := json.Marshal(msg)
-
-	// 2. 尝试在线投递
-	h.mu.RLock()
-	receiver, online := h.clients[msg.ReceiverID]
-	h.mu.RUnlock()
-
-	if online {
-		receiver.SafeSend(msgBytes)
-	} else {
-		// 3. 对方不在线，走离线推送
-		// TODO: 调用极光推送 / APNs 发送通知
-		log.Printf("[ws] 用户 %d 不在线，触发离线推送", msg.ReceiverID)
+	// 1. 持久化 + 在线投递 (与 REST /chat/send 共用同一逻辑)
+	chatMsg, err := h.persistAndDeliver(msg.SenderID, msg.ReceiverID, msg.MsgType, msg.Content, msg.TempID)
+	if err != nil {
+		return
 	}
 
-	// 4. 回传 ACK 给发送方 (确认服务端已收到并持久化)
+	// 2. 回传 ACK 给发送方 (确认服务端已收到并持久化)
 	h.mu.RLock()
 	sender, senderOnline := h.clients[msg.SenderID]
 	h.mu.RUnlock()
@@ -263,6 +238,72 @@ func (h *Hub) handleChatMessage(msg WSMessage) {
 		}
 		ackBytes, _ := json.Marshal(ack)
 		sender.SafeSend(ackBytes)
+	}
+}
+
+// persistAndDeliver 持久化一条聊天消息并尝试在线投递给接收方。
+// 供 WebSocket 与 REST /chat/send 共用；不做关系鉴权 (调用方负责)。
+func (h *Hub) persistAndDeliver(senderID, receiverID uint64, msgType, content, tempID string) (*model.ChatMessage, error) {
+	if msgType == "" {
+		msgType = "text"
+	}
+	chatMsg := model.ChatMessage{
+		SenderID:   senderID,
+		ReceiverID: receiverID,
+		MsgType:    msgType,
+		Content:    content,
+	}
+	if err := database.DB.Create(&chatMsg).Error; err != nil {
+		log.Printf("[ws] 消息持久化失败: %v", err)
+		return nil, err
+	}
+
+	deliver := WSMessage{
+		Type:       "chat",
+		SenderID:   senderID,
+		ReceiverID: receiverID,
+		MsgType:    msgType,
+		Content:    content,
+		TempID:     tempID,
+		MessageID:  chatMsg.ID,
+		Timestamp:  chatMsg.CreatedAt.UnixMilli(),
+	}
+	msgBytes, _ := json.Marshal(deliver)
+
+	h.mu.RLock()
+	receiver, online := h.clients[receiverID]
+	h.mu.RUnlock()
+
+	if online {
+		receiver.SafeSend(msgBytes)
+	} else {
+		// 对方不在线：当前仅做在线推送，离线消息由对方上线后 /chat/history 增量拉取补齐。
+		log.Printf("[ws] 用户 %d 不在线，消息已入库待其上线拉取", receiverID)
+	}
+	return &chatMsg, nil
+}
+
+// DeliverChat 是 persistAndDeliver 的导出封装，供 handler 层 (REST /chat/send) 调用。
+func (h *Hub) DeliverChat(senderID, receiverID uint64, msgType, content, tempID string) (*model.ChatMessage, error) {
+	return h.persistAndDeliver(senderID, receiverID, msgType, content, tempID)
+}
+
+// PushEvent 向指定用户推送一个通用事件 (绑定通知、匹配结束、陌生设备告警等)。
+// 仅在用户在线时投递 (在线推送模式)。
+func (h *Hub) PushEvent(userID uint64, eventType string, data interface{}) {
+	payload := map[string]interface{}{
+		"type":      eventType,
+		"data":      data,
+		"timestamp": time.Now().UnixMilli(),
+	}
+	msgBytes, _ := json.Marshal(payload)
+
+	h.mu.RLock()
+	client, online := h.clients[userID]
+	h.mu.RUnlock()
+
+	if online {
+		client.SafeSend(msgBytes)
 	}
 }
 

@@ -20,18 +20,18 @@ type Config struct {
 	Redis    RedisConfig    `mapstructure:"redis"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	SMS      SMSConfig      `mapstructure:"sms"`
-	OSS      OSSConfig      `mapstructure:"oss"`
+	Storage  StorageConfig  `mapstructure:"storage"`
 	LLM      LLMConfig      `mapstructure:"llm"`
 	Weather  WeatherConfig  `mapstructure:"weather"`
 	News     NewsConfig     `mapstructure:"news"`
-	STT      STTConfig      `mapstructure:"stt"`
 	Push     PushConfig     `mapstructure:"push"`
 }
 
 // ServerConfig HTTP 服务器配置。
 type ServerConfig struct {
-	Port int    `mapstructure:"port"`
-	Mode string `mapstructure:"mode"` // debug / release / test
+	Port         int      `mapstructure:"port"`
+	Mode         string   `mapstructure:"mode"` // debug / release / test
+	AllowOrigins []string `mapstructure:"allow_origins"`
 }
 
 // DatabaseConfig PostgreSQL 连接配置。
@@ -76,13 +76,11 @@ type SMSConfig struct {
 	TemplateCode    string `mapstructure:"template_code"`
 }
 
-// OSSConfig 对象存储配置。
-type OSSConfig struct {
-	Provider        string `mapstructure:"provider"`
-	Endpoint        string `mapstructure:"endpoint"`
-	AccessKeyID     string `mapstructure:"access_key_id"`
-	AccessKeySecret string `mapstructure:"access_key_secret"`
-	BucketName      string `mapstructure:"bucket_name"`
+// StorageConfig 自建文件存储配置 (替代第三方 OSS)。
+type StorageConfig struct {
+	Dir           string `mapstructure:"dir"`             // 本地存储根目录, 如 ./data/uploads
+	PublicBaseURL string `mapstructure:"public_base_url"` // 对外访问前缀, 如 https://zaima.example.com
+	MaxSizeMB     int    `mapstructure:"max_size_mb"`     // 单文件大小上限 (MB)
 }
 
 // LLMConfig 大语言模型配置。
@@ -94,26 +92,17 @@ type LLMConfig struct {
 	TimeoutSeconds int    `mapstructure:"timeout_seconds"`
 }
 
-// WeatherConfig 天气 API 配置。
+// WeatherConfig 天气配置 (Open-Meteo, 免费无需 key)。
 type WeatherConfig struct {
-	APIKey      string `mapstructure:"api_key"`
-	BaseURL     string `mapstructure:"base_url"`
+	BaseURL     string `mapstructure:"base_url"` // 预报接口, 如 https://api.open-meteo.com/v1
+	GeoURL      string `mapstructure:"geo_url"`  // 地理编码接口, 如 https://geocoding-api.open-meteo.com/v1
 	CacheTTLHrs int    `mapstructure:"cache_ttl_hours"`
 }
 
-// NewsConfig 新闻 API 配置。
+// NewsConfig 新闻配置 (自建 RSS 抓取)。
 type NewsConfig struct {
-	APIKey      string `mapstructure:"api_key"`
-	BaseURL     string `mapstructure:"base_url"`
-	CacheTTLHrs int    `mapstructure:"cache_ttl_hours"`
-}
-
-// STTConfig 语音转文字配置。
-type STTConfig struct {
-	Provider        string `mapstructure:"provider"`
-	AccessKeyID     string `mapstructure:"access_key_id"`
-	AccessKeySecret string `mapstructure:"access_key_secret"`
-	AppKey          string `mapstructure:"app_key"`
+	Feeds       []string `mapstructure:"feeds"` // RSS/Atom 源列表
+	CacheTTLHrs int      `mapstructure:"cache_ttl_hours"`
 }
 
 // PushConfig 推送服务配置。

@@ -107,8 +107,9 @@ func UpdateProfile(c *gin.Context) {
 		updates["nickname"] = req.Nickname
 	}
 	if req.AvatarURL != "" {
-		if !isValidAvatarURL(req.AvatarURL) {
-			response.BadRequest(c, "头像 URL 不合法，仅允许 HTTPS 地址")
+		// 头像允许: 本平台上传的地址, 或第三方 HTTPS 头像地址
+		if !isValidMediaURL(req.AvatarURL) && !isValidAvatarURL(req.AvatarURL) {
+			response.BadRequest(c, "头像 URL 不合法")
 			return
 		}
 		updates["avatar_url"] = req.AvatarURL
@@ -205,7 +206,14 @@ func BindRequest(c *gin.Context) {
 		return
 	}
 
-	// TODO: 通过 WebSocket/推送 通知对方确认绑定
+	// 在线通知对方有新的绑定请求待确认
+	notify(target.ID, "bind_request", gin.H{
+		"relation_id":  relation.ID,
+		"initiator_id": userID,
+		"remark":       req.Remark,
+		"message":      "有一个新的亲情绑定请求，请确认",
+	})
+
 	response.OK(c, gin.H{
 		"status":      "pending",
 		"relation_id": relation.ID,
@@ -249,7 +257,12 @@ func BindConfirm(c *gin.Context) {
 	// 更新状态为已绑定
 	database.DB.Model(&relation).Update("status", 1)
 
-	// TODO: 通过 WebSocket 通知发起方绑定成功（前端展示烟花/彩带效果）
+	// 在线通知发起方绑定成功 (前端可展示庆祝动效)
+	notify(relation.InitiatorID, "bind_confirmed", gin.H{
+		"relation_id": relation.ID,
+		"message":     "对方已确认绑定，亲情连接成功！",
+	})
+
 	response.OKWithMsg(c, "绑定成功！", gin.H{"relation_id": relation.ID})
 }
 
@@ -317,34 +330,4 @@ func isValidAvatarURL(rawURL string) bool {
 		return false
 	}
 	return strings.Contains(host, ".")
-}
-
-// isValidOSSURL 校验 URL 是否为合法的 OSS 地址 (防止 SSRF)。
-// 生产环境中应限制为具体的 OSS 域名白名单。
-func isValidOSSURL(url string) bool {
-	if url == "" {
-		return false
-	}
-	// 必须是 HTTPS 协议
-	if !strings.HasPrefix(url, "https://") {
-		return false
-	}
-	// 白名单: 允许通过的域名模式
-	allowedPatterns := []string{
-		"aliyuncs.com/",
-		"myqcloud.com/",
-		"amazonaws.com/",
-		"cdn.",
-		"oss.",
-	}
-	for _, pattern := range allowedPatterns {
-		if strings.Contains(url, pattern) {
-			return true
-		}
-	}
-	// 开发阶段兜底: 允许 example.com 用于测试
-	if strings.Contains(url, "example.com") {
-		return true
-	}
-	return false
 }

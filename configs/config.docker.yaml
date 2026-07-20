@@ -1,10 +1,13 @@
 # ============================================================
 # "在吗" APP 后端配置 - Docker 容器环境
+# 敏感项 (密码/密钥) 生产请用环境变量覆盖: ZAIMA_JWT_SECRET / ZAIMA_DATABASE_PASSWORD / ZAIMA_LLM_API_KEY 等
 # ============================================================
 
 server:
   port: 8080
   mode: debug
+  # 生产建议配置前端域名白名单，留空表示允许所有来源 (仅开发用)
+  allow_origins: []
 
 database:
   host: postgres
@@ -25,6 +28,7 @@ jwt:
   secret: "zaima-jwt-secret-change-in-production"
   expire_hours: 720
 
+# 短信 (暂未接入，debug 模式下验证码直接返回)
 sms:
   provider: aliyun
   access_key_id: ""
@@ -32,13 +36,13 @@ sms:
   sign_name: "在吗"
   template_code: ""
 
-oss:
-  provider: aliyun
-  endpoint: ""
-  access_key_id: ""
-  access_key_secret: ""
-  bucket_name: zaima-media
+# 自建文件存储 (替代第三方 OSS)
+storage:
+  dir: "./data/uploads"            # 本地存储根目录
+  public_base_url: ""              # 对外访问前缀, 如 https://zaima.example.com; 留空则返回相对路径
+  max_size_mb: 10
 
+# 大语言模型 (OpenAI 兼容, 填入 api_key 即启用; 未配置时自动回退规则引擎)
 llm:
   provider: deepseek
   api_key: ""
@@ -46,22 +50,20 @@ llm:
   model: "deepseek-chat"
   timeout_seconds: 10
 
+# 天气 (Open-Meteo, 免费无需 key)
 weather:
-  api_key: ""
-  base_url: "https://devapi.qweather.com/v7"
+  base_url: "https://api.open-meteo.com/v1"
+  geo_url: "https://geocoding-api.open-meteo.com/v1"
   cache_ttl_hours: 12
 
+# 新闻 (自建 RSS 抓取, 由后台 cron 定时拉取)
 news:
-  api_key: ""
-  base_url: "https://v.juhe.cn/toutiao/index"
-  cache_ttl_hours: 12
+  feeds:
+    - "https://www.chinanews.com.cn/rss/scroll-news.xml"
+    - "https://www.people.com.cn/rss/politics.xml"
+  cache_ttl_hours: 6
 
-stt:
-  provider: aliyun
-  access_key_id: ""
-  access_key_secret: ""
-  app_key: ""
-
+# 推送 (当前仅在线推送, 离线推送 APNs/FCM 待接入)
 push:
   app_key: ""
   master_secret: ""

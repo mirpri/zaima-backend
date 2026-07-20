@@ -2,12 +2,17 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
+	"zaima-backend/internal/pkg/llm"
+	"zaima-backend/internal/pkg/perm"
 	"zaima-backend/internal/pkg/response"
 )
 
@@ -58,14 +63,9 @@ func CreateChat(c *gin.Context) {
 		return
 	}
 
-	// 校验是否存在绑定关系
-	var relCount int64
-	database.DB.Model(&model.UserRelation{}).Where(
-		"status = 1 AND ((elder_id = ? AND youth_id = ?) OR (elder_id = ? AND youth_id = ?))",
-		userID, req.PeerID, req.PeerID, userID,
-	).Count(&relCount)
-	if relCount == 0 {
-		response.Fail(c, 4003, "必须先建立亲子绑定关系才能聊天")
+	// 校验是否存在可聊天关系 (亲子绑定 或 广场搭子)
+	if !perm.CanChat(database.DB, userID, req.PeerID) {
+		response.Fail(c, 4003, "需先建立亲子绑定或搭子关系才能聊天")
 		return
 	}
 
@@ -107,6 +107,57 @@ func CreateChat(c *gin.Context) {
 		"peer_avatar": peer.AvatarURL,
 		"status":      "created",
 		"message":     "聊天已建立",
+	})
+}
+
+// SendMessageReq 发送消息请求。
+type SendMessageReq struct {
+	ReceiverID uint64 `json:"receiver_id" binding:"required"`
+	Content    string `json:"content" binding:"required"`
+	MsgType    string `json:"msg_type"` // text/voice/image, 默认 text
+	TempID     string `json:"temp_id"`  // 客户端本地临时ID, 用于回执去重
+}
+
+// SendMessage 通过 REST 发送一条消息 (落库 + 在线投递)。
+// POST /api/v1/chat/send
+//
+// 与 WebSocket 发送等价，供不便维持长连接的场景 (如老人端弱网) 使用。
+func SendMessage(c *gin.Context) {
+	userID := c.GetUint64("user_id")
+
+	var req SendMessageReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数不完整")
+		return
+	}
+
+	// 媒体类型消息校验 URL 合法性 (防 SSRF)
+	if (req.MsgType == "voice" || req.MsgType == "image") && !isValidMediaURL(req.Content) {
+		response.BadRequest(c, "媒体地址不合法，请使用本平台上传的文件")
+		return
+	}
+
+	// 【安全】校验可聊天关系
+	if !perm.CanChat(database.DB, userID, req.ReceiverID) {
+		response.Fail(c, 403, "无权向该用户发送消息")
+		return
+	}
+
+	if Notifier == nil {
+		response.ServerError(c, "消息服务暂不可用")
+		return
+	}
+
+	msg, err := Notifier.DeliverChat(userID, req.ReceiverID, req.MsgType, req.Content, req.TempID)
+	if err != nil {
+		response.ServerError(c, "消息发送失败")
+		return
+	}
+
+	response.OK(c, gin.H{
+		"message_id": msg.ID,
+		"temp_id":    req.TempID,
+		"created_at": msg.CreatedAt,
 	})
 }
 
@@ -232,13 +283,8 @@ func GetChatHistory(c *gin.Context) {
 		pageSize = 100
 	}
 
-	// 【安全】校验当前用户与 peer 存在绑定关系 (防止 IDOR)
-	var relCount int64
-	database.DB.Model(&model.UserRelation{}).Where(
-		"status = 1 AND ((elder_id = ? AND youth_id = ?) OR (elder_id = ? AND youth_id = ?))",
-		userID, peerID, peerID, userID,
-	).Count(&relCount)
-	if relCount == 0 {
+	// 【安全】校验当前用户与 peer 存在可聊天关系 (防止 IDOR)
+	if !perm.CanChat(database.DB, userID, peerID) {
 		response.Fail(c, 403, "无权查看与该用户的聊天记录")
 		return
 	}
@@ -299,13 +345,8 @@ func AIReply(c *gin.Context) {
 		return
 	}
 
-	// 【安全】校验当前用户与 peer 存在绑定关系 (防止 IDOR)
-	var relCount int64
-	database.DB.Model(&model.UserRelation{}).Where(
-		"status = 1 AND ((elder_id = ? AND youth_id = ?) OR (elder_id = ? AND youth_id = ?))",
-		userID, peerID, peerID, userID,
-	).Count(&relCount)
-	if relCount == 0 {
+	// 【安全】校验当前用户与 peer 存在可聊天关系 (防止 IDOR)
+	if !perm.CanChat(database.DB, userID, peerID) {
 		response.Fail(c, 403, "无权获取与该用户的 AI 回复建议")
 		return
 	}
@@ -320,11 +361,8 @@ func AIReply(c *gin.Context) {
 		return
 	}
 
-	// TODO: 对语音类型消息先调 STT 转文字
-	// TODO: 调用 LLM API 生成建议回复
-
-	// 兜底规则引擎 (当 LLM 不可用时)
-	suggestions := generateFallbackReplies(lastMsg.Content, lastMsg.MsgType)
+	// 优先调用 LLM 生成建议，失败/未配置时回退规则引擎
+	suggestions := generateAIReplies(c.Request.Context(), lastMsg.Content, lastMsg.MsgType)
 
 	response.OK(c, gin.H{
 		"original_msg": lastMsg.Content,
@@ -333,23 +371,46 @@ func AIReply(c *gin.Context) {
 	})
 }
 
-// STTConvert 语音转文字接口。
-// POST /api/v1/chat/stt
-//
-// 接收语音文件 URL 或二进制流，返回转录文本。
-func STTConvert(c *gin.Context) {
-	voiceURL := c.PostForm("voice_url")
-	if voiceURL == "" {
-		response.BadRequest(c, "缺少语音文件")
-		return
+// generateAIReplies 调用 LLM 生成 3 条贴心回复；不可用时回退到规则引擎。
+func generateAIReplies(ctx context.Context, content, msgType string) []string {
+	if msgType != "text" || content == "" {
+		return generateFallbackReplies(content, msgType)
+	}
+	prompt := "你在帮一位在外打拼的年轻人回复父母的消息。请针对父母的这句话，生成3条温暖、简短(每条不超过15个字)、口语化的回复建议。" +
+		"只输出一个 JSON 字符串数组，不要任何解释。父母说：" + content
+
+	out, err := llm.Chat(ctx, []llm.Message{
+		{Role: "system", Content: "你是一个贴心的家庭沟通助手，只返回JSON数组。"},
+		{Role: "user", Content: prompt},
+	})
+	if err != nil {
+		return generateFallbackReplies(content, msgType)
 	}
 
-	// TODO: 集成阿里云/腾讯云 STT SDK
-	// 临时伪实现
-	response.OK(c, gin.H{
-		"text":   "【语音转写功能对接中】",
-		"status": "pending",
-	})
+	if replies := parseJSONStringArray(out); len(replies) > 0 {
+		return replies
+	}
+	return generateFallbackReplies(content, msgType)
+}
+
+// parseJSONStringArray 从 LLM 输出中提取 JSON 字符串数组 (容忍 ```json 代码块包裹)。
+func parseJSONStringArray(s string) []string {
+	start := strings.Index(s, "[")
+	end := strings.LastIndex(s, "]")
+	if start < 0 || end <= start {
+		return nil
+	}
+	var arr []string
+	if err := json.Unmarshal([]byte(s[start:end+1]), &arr); err != nil {
+		return nil
+	}
+	cleaned := make([]string, 0, len(arr))
+	for _, r := range arr {
+		if r = strings.TrimSpace(r); r != "" {
+			cleaned = append(cleaned, r)
+		}
+	}
+	return cleaned
 }
 
 // ==================== 工具函数 ====================

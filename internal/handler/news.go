@@ -14,6 +14,7 @@ import (
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
 	"zaima-backend/internal/pkg/response"
+	"zaima-backend/internal/pkg/weather"
 )
 
 // ==================== Handler ====================
@@ -46,31 +47,33 @@ func GetWeather(c *gin.Context) {
 		}
 	}
 
-	// 2. 缓存未命中，调用第三方天气 API
-	// TODO: 集成和风天气 SDK (https://devapi.qweather.com/v7/weather/now)
-	// 伪数据兜底
-	weatherData := gin.H{
-		"city":     city,
-		"temp":     "15°C",
-		"text":     "多云",
-		"icon":     "cloudy",
-		"wind_dir": "东北风",
-		"humidity": "65%",
-		"tips":     "降温明显，记得多穿点衣服~",
-		"updated":  time.Now().Format("2006-01-02 15:04"),
+	// 2. 缓存未命中，调用 Open-Meteo 实时查询
+	source := "api"
+	var weatherData interface{}
+	if wd, err := weather.Fetch(c.Request.Context(), city); err == nil {
+		weatherData = wd
+		// 命中真实数据才写缓存
+		ttl := time.Duration(config.AppConfig.Weather.CacheTTLHrs) * time.Hour
+		if ttl == 0 {
+			ttl = 12 * time.Hour
+		}
+		jsonBytes, _ := json.Marshal(wd)
+		database.RDB.Set(ctx, cacheKey, string(jsonBytes), ttl)
+	} else {
+		// 天气服务不可用时的兜底 (不缓存)
+		source = "fallback"
+		weatherData = gin.H{
+			"city":    city,
+			"temp":    "--",
+			"text":    "暂无数据",
+			"icon":    "cloudy",
+			"tips":    "天气服务暂时不可用，请稍后再看~",
+			"updated": time.Now().Format("2006-01-02 15:04"),
+		}
 	}
-
-	// 写入缓存
-	ttl := time.Duration(config.AppConfig.Weather.CacheTTLHrs) * time.Hour
-	if ttl == 0 {
-		ttl = 12 * time.Hour
-	}
-	// 【修复】使用 json.Marshal 序列化存储，而非 fmt.Sprintf
-	jsonBytes, _ := json.Marshal(weatherData)
-	database.RDB.Set(ctx, cacheKey, string(jsonBytes), ttl)
 
 	response.OK(c, gin.H{
-		"source": "api",
+		"source": source,
 		"data":   weatherData,
 	})
 }
@@ -95,7 +98,13 @@ func GetCareCards(c *gin.Context) {
 		cards = append(cards, gin.H{"icon": "moon", "text": "早点休息，别熬夜~"})
 	}
 
-	// TODO: 根据实际天气数据动态调整，如降温预警、暴雨提醒等
+	// 结合实时天气动态追加关怀卡片 (降温/下雨等)
+	if city := c.Query("city"); city != "" {
+		if wd, err := weather.Fetch(c.Request.Context(), city); err == nil && wd.Tips != "" {
+			cards = append(cards, gin.H{"icon": wd.Icon, "text": wd.Tips})
+		}
+	}
+
 	cards = append(cards, gin.H{"icon": "heart", "text": "想你了，有空打个电话~"})
 
 	response.OK(c, gin.H{"cards": cards})
@@ -161,7 +170,7 @@ func GetNews(c *gin.Context) {
 	query.Offset((pageNum - 1) * pageSz).Limit(pageSz).Find(&news)
 
 	if len(news) == 0 {
-		// TODO: 触发异步抓取新闻任务
+		// 新闻由后台 cron 定时从 RSS 源抓取入库，此处直接返回空 + 提示
 		response.OK(c, gin.H{
 			"city":    city,
 			"tab":     tab,
