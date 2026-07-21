@@ -429,6 +429,84 @@ func generateCareSuggestions(ctx context.Context, role int, wd *weather.Data) []
 	return []string{"最近天气多变，注意身体~", "记得按时吃饭休息", "想你了，有空聊聊"}
 }
 
+// ComposeReq AI 帮你写请求。
+type ComposeReq struct {
+	PeerID uint64 `json:"peer_id"`
+	Draft  string `json:"draft" binding:"required"`
+}
+
+// AICompose 把关键词/草稿扩写成一段温暖的话。
+// POST /api/v1/chat/ai-compose
+func AICompose(c *gin.Context) {
+	userID := c.GetUint64("user_id")
+	role := c.GetInt("role")
+
+	var req ComposeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请先输入几个词")
+		return
+	}
+	if req.PeerID != 0 && !perm.CanChat(database.DB, userID, req.PeerID) {
+		response.Fail(c, 403, "无权限")
+		return
+	}
+
+	prompt := fmt.Sprintf("把下面的关键词或草稿，扩写成一段温暖、自然、口语化的话，准备发给%s。不超过40字，只输出这段话本身，不要引号和解释：%s",
+		kinLabel(role), req.Draft)
+	out, err := llm.Chat(c.Request.Context(), []llm.Message{
+		{Role: "system", Content: "你是贴心的家庭沟通助手，帮用户把话说得温暖自然。"},
+		{Role: "user", Content: prompt},
+	})
+	text := strings.TrimSpace(out)
+	if err != nil || text == "" {
+		text = req.Draft // 兜底返回原文
+	}
+	response.OK(c, gin.H{"text": text})
+}
+
+// ChatSummary 用 AI 总结与对方最近的聊天要点。
+// GET /api/v1/chat/summary?peer_id=X
+func ChatSummary(c *gin.Context) {
+	userID := c.GetUint64("user_id")
+
+	peerID, err := strconv.ParseUint(c.Query("peer_id"), 10, 64)
+	if err != nil || peerID == 0 {
+		response.BadRequest(c, "peer_id 参数无效")
+		return
+	}
+	if !perm.CanChat(database.DB, userID, peerID) {
+		response.Fail(c, 403, "无权限")
+		return
+	}
+
+	var msgs []model.ChatMessage
+	database.DB.Where("((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)) AND msg_type = 'text'",
+		userID, peerID, peerID, userID).Order("created_at DESC").Limit(30).Find(&msgs)
+	if len(msgs) == 0 {
+		response.OK(c, gin.H{"summary": "你们还没有聊过天，去打个招呼吧~"})
+		return
+	}
+
+	var sb strings.Builder
+	for i := len(msgs) - 1; i >= 0; i-- {
+		who := "我"
+		if msgs[i].SenderID == peerID {
+			who = "对方"
+		}
+		sb.WriteString(who + "：" + msgs[i].Content + "\n")
+	}
+	prompt := "用3句话以内总结下面这段家人聊天的要点(对方最近在关心/在忙什么、有没有需要留意的事)。只输出总结：\n" + sb.String()
+	out, err := llm.Chat(c.Request.Context(), []llm.Message{
+		{Role: "system", Content: "你是家庭沟通助手，简洁总结聊天要点。"},
+		{Role: "user", Content: prompt},
+	})
+	summary := strings.TrimSpace(out)
+	if err != nil || summary == "" {
+		summary = fmt.Sprintf("最近你们聊了 %d 条消息，记得常联系哦~", len(msgs))
+	}
+	response.OK(c, gin.H{"summary": summary})
+}
+
 // selfLabel/kinLabel 根据当前用户角色给出称呼。role: 1=老人, 2=年轻人。
 func selfLabel(role int) string {
 	if role == 1 {

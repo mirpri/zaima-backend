@@ -117,6 +117,18 @@ type ChatMessage struct {
 // TableName 指定聊天消息表名。
 func (ChatMessage) TableName() string { return "chat_messages" }
 
+// BotMessage AI 陪伴助手的对话记录 (每个用户与机器人的私聊)。
+type BotMessage struct {
+	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID    uint64    `gorm:"index;not null" json:"user_id"`
+	Role      string    `gorm:"type:varchar(16);not null;comment:user/assistant" json:"role"`
+	Content   string    `gorm:"type:text;not null" json:"content"`
+	CreatedAt time.Time `gorm:"autoCreateTime;index" json:"created_at"`
+}
+
+// TableName 指定机器人消息表名。
+func (BotMessage) TableName() string { return "bot_messages" }
+
 // ==================== 广场气泡 ====================
 
 // SquareBubble 广场 "一起玩" 气泡表。

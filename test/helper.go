@@ -47,6 +47,7 @@ func SetupTestDB() *gorm.DB {
 		&model.DeviceStatusLog{},
 		&model.MonthlyReport{},
 		&model.ChatMessage{},
+		&model.BotMessage{},
 		&model.SquareBubble{},
 		&model.NewsCache{},
 	)
@@ -120,6 +121,7 @@ func CleanDB() {
 	database.DB.Exec("DELETE FROM device_status_logs")
 	database.DB.Exec("DELETE FROM monthly_reports")
 	database.DB.Exec("DELETE FROM chat_messages")
+	database.DB.Exec("DELETE FROM bot_messages")
 	database.DB.Exec("DELETE FROM square_bubbles")
 	database.DB.Exec("DELETE FROM news_cache")
 }

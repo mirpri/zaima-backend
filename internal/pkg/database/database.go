@@ -43,6 +43,7 @@ func InitPostgres(cfg *config.DatabaseConfig) {
 		&model.DeviceStatusLog{},
 		&model.MonthlyReport{},
 		&model.ChatMessage{},
+		&model.BotMessage{},
 		&model.SquareBubble{},
 		&model.NewsCache{},
 	); err != nil {

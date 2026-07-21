@@ -297,14 +297,15 @@ func UpdateInterests(c *gin.Context) {
 
 // FamilyMember 已绑定家人信息。
 type FamilyMember struct {
-	UserID    uint64     `json:"user_id"`
-	Nickname  string     `json:"nickname"`
-	AvatarURL string     `json:"avatar_url"`
-	Phone     string     `json:"phone"`
-	Role      int        `json:"role"`
-	Remark    string     `json:"remark"`
-	City      string     `json:"city"`
-	LastLogin *time.Time `json:"last_login"` // 可能为空(从未登录)
+	UserID      uint64     `json:"user_id"`
+	Nickname    string     `json:"nickname"`
+	AvatarURL   string     `json:"avatar_url"`
+	Phone       string     `json:"phone"`
+	Role        int        `json:"role"`
+	Remark      string     `json:"remark"`
+	City        string     `json:"city"`
+	LastLogin   *time.Time `json:"last_login"`   // 可能为空(从未登录)
+	LastContact *time.Time `json:"last_contact"` // 最近一次互相聊天时间(可能为空)
 }
 
 // GetFamily 获取当前用户已绑定的家人列表(含昵称/头像/电话/上次登录)。
@@ -330,15 +331,28 @@ func GetFamily(c *gin.Context) {
 			t := u.LastLoginAt
 			last = &t
 		}
+
+		// 最近一次互相聊天时间(用于关怀提醒)
+		var lastContact *time.Time
+		var lastMsg model.ChatMessage
+		if err := database.DB.Where(
+			"(sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)",
+			userID, peerID, peerID, userID,
+		).Order("created_at DESC").First(&lastMsg).Error; err == nil {
+			t := lastMsg.CreatedAt
+			lastContact = &t
+		}
+
 		members = append(members, FamilyMember{
-			UserID:    u.ID,
-			Nickname:  u.Nickname,
-			AvatarURL: u.AvatarURL,
-			Phone:     u.Phone,
-			Role:      u.Role,
-			Remark:    r.Remark,
-			City:      u.City,
-			LastLogin: last,
+			UserID:      u.ID,
+			Nickname:    u.Nickname,
+			AvatarURL:   u.AvatarURL,
+			Phone:       u.Phone,
+			Role:        u.Role,
+			Remark:      r.Remark,
+			City:        u.City,
+			LastLogin:   last,
+			LastContact: lastContact,
 		})
 	}
 

@@ -116,12 +116,16 @@ func SetupRouter(hub *ws.Hub) *gin.Engine {
 	// --- 聊天 REST 模块 ---
 	chat := authorized.Group("/chat")
 	{
-		chat.POST("/create", handler.CreateChat)       // 创建聊天（发起第一次对话）
-		chat.POST("/send", handler.SendMessage)        // 发送消息 (REST，落库+在线投递)
-		chat.GET("/sessions", handler.GetChatSessions) // 会话列表
-		chat.GET("/history", handler.GetChatHistory)   // 聊天历史
-		chat.POST("/ai-suggest", handler.AIReply)      // AI回复/开场建议
-		chat.GET("/care-suggest", handler.CareSuggest) // 对方天气关怀话语
+		chat.POST("/create", handler.CreateChat)        // 创建聊天（发起第一次对话）
+		chat.POST("/send", handler.SendMessage)         // 发送消息 (REST，落库+在线投递)
+		chat.GET("/sessions", handler.GetChatSessions)  // 会话列表
+		chat.GET("/history", handler.GetChatHistory)    // 聊天历史
+		chat.POST("/ai-suggest", handler.AIReply)       // AI回复/开场建议
+		chat.GET("/care-suggest", handler.CareSuggest)  // 对方天气关怀话语
+		chat.POST("/ai-compose", handler.AICompose)     // AI帮你写(关键词扩写)
+		chat.GET("/summary", handler.ChatSummary)       // AI对话摘要
+		chat.GET("/bot/history", handler.GetBotHistory) // AI陪伴助手对话历史
+		chat.POST("/bot/send", handler.BotSend)         // 给AI陪伴助手发消息
 	}
 
 	// --- 自建文件上传 ---
