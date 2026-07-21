@@ -19,13 +19,14 @@ import (
 // ==================== 请求体定义 ====================
 
 // PublishBubbleReq 发布气泡请求。
+// 仅 InterestTag 必填；语音与定位为可选增强（老人端录音/定位权限不稳定时也能发布）。
 type PublishBubbleReq struct {
-	VoiceURL    string  `json:"voice_url" binding:"required"` // OSS 录音文件 URL
+	VoiceURL    string  `json:"voice_url"` // 本平台上传的录音 URL（可选）
 	InterestTag string  `json:"interest_tag" binding:"required"`
 	Province    string  `json:"province"`
 	City        string  `json:"city"`
-	Longitude   float64 `json:"longitude" binding:"required"`
-	Latitude    float64 `json:"latitude" binding:"required"`
+	Longitude   float64 `json:"longitude"`
+	Latitude    float64 `json:"latitude"`
 }
 
 // MatchConfirmReq 确认匹配请求。
@@ -69,8 +70,8 @@ func PublishBubble(c *gin.Context) {
 	var user model.User
 	database.DB.First(&user, userID)
 
-	// 【安全】URL 校验，防止 SSRF / 任意外链
-	if !isValidMediaURL(req.VoiceURL) {
+	// 【安全】提供了语音时才校验 URL，防止 SSRF / 任意外链
+	if req.VoiceURL != "" && !isValidMediaURL(req.VoiceURL) {
 		response.BadRequest(c, "语音 URL 不合法，请使用本平台上传的文件地址")
 		return
 	}
@@ -94,18 +95,17 @@ func PublishBubble(c *gin.Context) {
 		return
 	}
 
-	// 写入 Redis GEO 用于地理位置范围查询
-	ctx := context.Background()
-	geoKey := "square:geo"
-	memberKey := fmt.Sprintf("bubble:%d", bubble.ID)
-
-	database.RDB.GeoAdd(ctx, geoKey, &redis.GeoLocation{
-		Name:      memberKey,
-		Longitude: req.Longitude,
-		Latitude:  req.Latitude,
-	})
-	// 设置4小时后自动过期 (使用单独的 key 标记 TTL)
-	database.RDB.Set(ctx, fmt.Sprintf("square:ttl:%d", bubble.ID), "1", 4*time.Hour)
+	// 提供了定位才写入 Redis GEO（用于附近范围查询）
+	if req.Longitude != 0 && req.Latitude != 0 {
+		ctx := context.Background()
+		memberKey := fmt.Sprintf("bubble:%d", bubble.ID)
+		database.RDB.GeoAdd(ctx, "square:geo", &redis.GeoLocation{
+			Name:      memberKey,
+			Longitude: req.Longitude,
+			Latitude:  req.Latitude,
+		})
+		database.RDB.Set(ctx, fmt.Sprintf("square:ttl:%d", bubble.ID), "1", 4*time.Hour)
+	}
 
 	response.OKWithMsg(c, "发布成功", gin.H{"bubble_id": bubble.ID})
 }

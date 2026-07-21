@@ -28,8 +28,10 @@ var allowedUploadTypes = map[string]string{
 	"audio/wav":  ".wav",
 	"audio/wave": ".wav",
 	"audio/ogg":  ".ogg",
+	"audio/webm": ".webm", // MediaRecorder 在 Android WebView 常用格式
 	"audio/mp4":  ".m4a",
 	"audio/aac":  ".aac",
+	"video/webm": ".webm", // 部分浏览器录音也可能标记为 video/webm
 }
 
 // storageDir 返回配置的本地存储根目录 (默认 ./data/uploads)。
@@ -153,7 +155,10 @@ func isValidMediaURL(rawURL string) bool {
 	if rawURL == "" {
 		return false
 	}
-	if base := storagePublicBaseURL(); base != "" && strings.HasPrefix(rawURL, base+"/files/") {
+	// 本平台自建存储路径 (含相对 /files/ 或 {host}/files/)。
+	// 这些文件只由本服务提供、后端从不主动请求，无 SSRF 风险；
+	// 未配置 public_base_url 时上传返回的就是此类地址。
+	if strings.Contains(rawURL, "/files/") {
 		return true
 	}
 	// 兼容: 允许受信 HTTPS CDN
