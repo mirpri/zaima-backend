@@ -4,6 +4,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"zaima-backend/internal/pkg/llm"
 	"zaima-backend/internal/pkg/perm"
 	"zaima-backend/internal/pkg/response"
+	"zaima-backend/internal/pkg/weather"
 )
 
 // ==================== 请求体定义 ====================
@@ -351,46 +353,119 @@ func AIReply(c *gin.Context) {
 		return
 	}
 
-	// 获取对方最近一条消息
+	role := c.GetInt("role")
+
+	// 获取对方最近一条文字消息（可能没有 -> 生成打招呼/话题开场）
 	var lastMsg model.ChatMessage
-	result := database.DB.Where("sender_id = ? AND receiver_id = ?", peerID, userID).
+	database.DB.Where("sender_id = ? AND receiver_id = ? AND msg_type = 'text'", peerID, userID).
 		Order("created_at DESC").First(&lastMsg)
 
-	if result.RowsAffected == 0 {
-		response.Fail(c, 3001, "暂无父母消息")
-		return
-	}
-
-	// 优先调用 LLM 生成建议，失败/未配置时回退规则引擎
-	suggestions := generateAIReplies(c.Request.Context(), lastMsg.Content, lastMsg.MsgType)
+	suggestions := generateAIReplies(c.Request.Context(), lastMsg.Content, role)
 
 	response.OK(c, gin.H{
 		"original_msg": lastMsg.Content,
-		"msg_type":     lastMsg.MsgType,
 		"suggestions":  suggestions,
 	})
 }
 
-// generateAIReplies 调用 LLM 生成 3 条贴心回复；不可用时回退到规则引擎。
-func generateAIReplies(ctx context.Context, content, msgType string) []string {
-	if msgType != "text" || content == "" {
-		return generateFallbackReplies(content, msgType)
+// CareSuggest 根据对方所在城市的天气，生成可直接发送的关怀话语。
+// GET /api/v1/chat/care-suggest?peer_id=X
+func CareSuggest(c *gin.Context) {
+	userID := c.GetUint64("user_id")
+	role := c.GetInt("role")
+
+	peerID, err := strconv.ParseUint(c.Query("peer_id"), 10, 64)
+	if err != nil || peerID == 0 {
+		response.BadRequest(c, "peer_id 参数无效")
+		return
 	}
-	prompt := "你在帮一位在外打拼的年轻人回复父母的消息。请针对父母的这句话，生成3条温暖、简短(每条不超过15个字)、口语化的回复建议。" +
-		"只输出一个 JSON 字符串数组，不要任何解释。父母说：" + content
+	if !perm.CanChat(database.DB, userID, peerID) {
+		response.Fail(c, 403, "无权限")
+		return
+	}
+
+	var peer model.User
+	if err := database.DB.First(&peer, peerID).Error; err != nil {
+		response.Fail(c, 4002, "用户不存在")
+		return
+	}
+
+	var wd *weather.Data
+	if peer.City != "" {
+		wd, _ = weather.Fetch(c.Request.Context(), peer.City)
+	}
+
+	resp := gin.H{
+		"peer_city":   peer.City,
+		"suggestions": generateCareSuggestions(c.Request.Context(), role, wd),
+	}
+	if wd != nil {
+		resp["weather"] = wd
+	}
+	response.OK(c, resp)
+}
+
+// generateCareSuggestions 结合对方天气生成关怀话语，失败回退规则。
+func generateCareSuggestions(ctx context.Context, role int, wd *weather.Data) []string {
+	desc := "天气未知"
+	if wd != nil {
+		desc = fmt.Sprintf("%s，%s", wd.Text, wd.Temp)
+	}
+	prompt := fmt.Sprintf("你在帮一位%s给%s发一句天气关怀。对方所在地天气：%s。生成3条温暖、简短(每条≤20字)、可直接发送的关怀话。只输出JSON字符串数组。",
+		selfLabel(role), kinLabel(role), desc)
 
 	out, err := llm.Chat(ctx, []llm.Message{
-		{Role: "system", Content: "你是一个贴心的家庭沟通助手，只返回JSON数组。"},
+		{Role: "system", Content: "你是贴心的家庭关怀助手，只返回JSON数组。"},
 		{Role: "user", Content: prompt},
 	})
-	if err != nil {
-		return generateFallbackReplies(content, msgType)
+	if err == nil {
+		if s := parseJSONStringArray(out); len(s) > 0 {
+			return s
+		}
+	}
+	if wd != nil && wd.Tips != "" {
+		return []string{wd.Tips, "记得照顾好自己~", "想你了，有空聊聊"}
+	}
+	return []string{"最近天气多变，注意身体~", "记得按时吃饭休息", "想你了，有空聊聊"}
+}
+
+// selfLabel/kinLabel 根据当前用户角色给出称呼。role: 1=老人, 2=年轻人。
+func selfLabel(role int) string {
+	if role == 1 {
+		return "老人"
+	}
+	return "在外打拼的年轻人"
+}
+func kinLabel(role int) string {
+	if role == 1 {
+		return "孩子"
+	}
+	return "父母"
+}
+
+// generateAIReplies 调用 LLM 生成 3 条建议；无对方消息则生成打招呼开场；不可用时回退规则引擎。
+func generateAIReplies(ctx context.Context, peerText string, role int) []string {
+	peerText = strings.TrimSpace(peerText)
+
+	var prompt string
+	if peerText == "" {
+		prompt = fmt.Sprintf("你在帮一位%s主动给%s发消息、开启对话。生成3条温暖、简短(每条不超过18字)、口语化的问候或话题开场。只输出JSON字符串数组。",
+			selfLabel(role), kinLabel(role))
+	} else {
+		prompt = fmt.Sprintf("你在帮一位%s回复%s的消息。针对对方这句话，生成3条温暖、简短(每条不超过18字)、口语化的回复。只输出JSON字符串数组。对方说：%s",
+			selfLabel(role), kinLabel(role), peerText)
 	}
 
-	if replies := parseJSONStringArray(out); len(replies) > 0 {
-		return replies
+	out, err := llm.Chat(ctx, []llm.Message{
+		{Role: "system", Content: "你是贴心的家庭沟通助手，只返回JSON数组，不要解释。"},
+		{Role: "user", Content: prompt},
+	})
+	if err == nil {
+		if replies := parseJSONStringArray(out); len(replies) > 0 {
+			return replies
+		}
 	}
-	return generateFallbackReplies(content, msgType)
+	return generateFallbackReplies(peerText, role)
 }
 
 // parseJSONStringArray 从 LLM 输出中提取 JSON 字符串数组 (容忍 ```json 代码块包裹)。
@@ -431,18 +506,18 @@ func contains(s, substr string) bool {
 	return false
 }
 
-// generateFallbackReplies LLM 不可用时的兜底回复建议。
-func generateFallbackReplies(content, msgType string) []string {
-	replies := []string{
-		"收到啦，妈~",
-		"好的，我知道了",
-		"谢谢关心，我这边都好",
+// generateFallbackReplies LLM 不可用时的兜底建议（按角色 + 有无对方消息区分）。
+func generateFallbackReplies(peerText string, role int) []string {
+	if peerText == "" {
+		// 打招呼开场
+		if role == 1 {
+			return []string{"孩子，今天忙不忙？", "记得按时吃饭哦~", "有空回个电话呀"}
+		}
+		return []string{"爸妈，今天感觉怎么样？", "天气变化记得添衣~", "最近身体还好吗？"}
 	}
-
-	// 简单的关键字匹配生成更贴切的回复
-	if msgType == "voice" {
-		replies = append(replies, "语音收到了，等会儿回~")
+	// 回复
+	if role == 1 {
+		return []string{"知道啦，谢谢你~", "你也要照顾好自己", "好的，我记住了"}
 	}
-
-	return replies
+	return []string{"收到啦，放心吧~", "好的，我知道了", "谢谢关心，我这边都好"}
 }

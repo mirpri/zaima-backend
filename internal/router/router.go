@@ -120,7 +120,8 @@ func SetupRouter(hub *ws.Hub) *gin.Engine {
 		chat.POST("/send", handler.SendMessage)        // 发送消息 (REST，落库+在线投递)
 		chat.GET("/sessions", handler.GetChatSessions) // 会话列表
 		chat.GET("/history", handler.GetChatHistory)   // 聊天历史
-		chat.POST("/ai-suggest", handler.AIReply)      // AI回复建议
+		chat.POST("/ai-suggest", handler.AIReply)      // AI回复/开场建议
+		chat.GET("/care-suggest", handler.CareSuggest) // 对方天气关怀话语
 	}
 
 	// --- 自建文件上传 ---
