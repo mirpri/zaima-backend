@@ -10,16 +10,17 @@ import (
 
 // User 用户总表，存储老人和年轻人的基本身份信息。
 type User struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	Phone     string    `gorm:"type:varchar(20);uniqueIndex;not null" json:"phone"`
-	Role      int       `gorm:"type:smallint;not null;comment:1=老人,2=年轻人" json:"role"`
-	Nickname  string    `gorm:"type:varchar(32);default:''" json:"nickname"`
-	AvatarURL string    `gorm:"type:varchar(512);default:''" json:"avatar_url"`
-	City      string    `gorm:"type:varchar(64);default:''" json:"city"`
-	Province  string    `gorm:"type:varchar(64);default:''" json:"province"`
-	DeviceID  string    `gorm:"type:varchar(128);default:''" json:"device_id"` // 最近登录的设备标识
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	Phone       string    `gorm:"type:varchar(20);uniqueIndex;not null" json:"phone"`
+	Role        int       `gorm:"type:smallint;not null;comment:1=老人,2=年轻人" json:"role"`
+	Nickname    string    `gorm:"type:varchar(32);default:''" json:"nickname"`
+	AvatarURL   string    `gorm:"type:varchar(512);default:''" json:"avatar_url"`
+	City        string    `gorm:"type:varchar(64);default:''" json:"city"`
+	Province    string    `gorm:"type:varchar(64);default:''" json:"province"`
+	DeviceID    string    `gorm:"type:varchar(128);default:''" json:"device_id"` // 最近登录的设备标识
+	LastLoginAt time.Time `json:"last_login_at"`                                 // 最近登录时间
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // TableName 指定用户表名。

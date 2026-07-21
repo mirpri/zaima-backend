@@ -119,10 +119,12 @@ func Login(c *gin.Context) {
 		go notifyYouthStrangeDevice(user.ID, req.DeviceID)
 	}
 
-	// 更新设备 ID
+	// 更新设备 ID 与最近登录时间
+	updates := map[string]interface{}{"last_login_at": time.Now()}
 	if req.DeviceID != "" {
-		database.DB.Model(&user).Update("device_id", req.DeviceID)
+		updates["device_id"] = req.DeviceID
 	}
+	database.DB.Model(&user).Updates(updates)
 
 	// 4. 生成 JWT Token
 	token, err := utils.GenerateToken(

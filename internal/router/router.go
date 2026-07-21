@@ -79,6 +79,7 @@ func SetupRouter(hub *ws.Hub) *gin.Engine {
 	{
 		user.GET("/profile", handler.GetProfile)        // 获取用户资料
 		user.PUT("/profile", handler.UpdateProfile)     // 更新用户资料
+		user.GET("/family", handler.GetFamily)          // 已绑定家人列表
 		user.POST("/bind", handler.BindRequest)         // 发起亲子绑定
 		user.POST("/bind/confirm", handler.BindConfirm) // 确认绑定
 		user.PUT("/interests", handler.UpdateInterests) // 更新兴趣标签

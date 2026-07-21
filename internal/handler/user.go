@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -292,6 +293,56 @@ func UpdateInterests(c *gin.Context) {
 	}
 
 	response.OKWithMsg(c, "兴趣标签已更新", nil)
+}
+
+// FamilyMember 已绑定家人信息。
+type FamilyMember struct {
+	UserID    uint64     `json:"user_id"`
+	Nickname  string     `json:"nickname"`
+	AvatarURL string     `json:"avatar_url"`
+	Phone     string     `json:"phone"`
+	Role      int        `json:"role"`
+	Remark    string     `json:"remark"`
+	City      string     `json:"city"`
+	LastLogin *time.Time `json:"last_login"` // 可能为空(从未登录)
+}
+
+// GetFamily 获取当前用户已绑定的家人列表(含昵称/头像/电话/上次登录)。
+// GET /api/v1/user/family
+func GetFamily(c *gin.Context) {
+	userID := c.GetUint64("user_id")
+
+	var relations []model.UserRelation
+	database.DB.Where("status = 1 AND (elder_id = ? OR youth_id = ?)", userID, userID).Find(&relations)
+
+	members := make([]FamilyMember, 0, len(relations))
+	for _, r := range relations {
+		peerID := r.ElderID
+		if peerID == userID {
+			peerID = r.YouthID
+		}
+		var u model.User
+		if err := database.DB.First(&u, peerID).Error; err != nil {
+			continue
+		}
+		var last *time.Time
+		if !u.LastLoginAt.IsZero() {
+			t := u.LastLoginAt
+			last = &t
+		}
+		members = append(members, FamilyMember{
+			UserID:    u.ID,
+			Nickname:  u.Nickname,
+			AvatarURL: u.AvatarURL,
+			Phone:     u.Phone,
+			Role:      u.Role,
+			Remark:    r.Remark,
+			City:      u.City,
+			LastLogin: last,
+		})
+	}
+
+	response.OK(c, gin.H{"family": members})
 }
 
 // ==================== 工具函数 ====================
