@@ -124,7 +124,9 @@ type SquareBubble struct {
 	UserID      uint64    `gorm:"index;not null" json:"user_id"`
 	Nickname    string    `gorm:"type:varchar(32);not null" json:"nickname"`
 	AvatarURL   string    `gorm:"type:varchar(512);default:''" json:"avatar_url"`
-	VoiceURL    string    `gorm:"type:varchar(512);not null;comment:OSS录音URL" json:"voice_url"`
+	VoiceURL    string    `gorm:"type:varchar(512);default:'';comment:录音URL(可选)" json:"voice_url"`
+	Content     string    `gorm:"type:varchar(500);default:'';comment:文字内容(可选)" json:"content"`
+	ImageURL    string    `gorm:"type:varchar(512);default:'';comment:图片URL(可选)" json:"image_url"`
 	InterestTag string    `gorm:"type:varchar(32);not null;comment:活动兴趣标签" json:"interest_tag"`
 	Province    string    `gorm:"type:varchar(64);default:''" json:"province"`
 	City        string    `gorm:"type:varchar(64);default:''" json:"city"`

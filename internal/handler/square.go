@@ -19,10 +19,12 @@ import (
 // ==================== 请求体定义 ====================
 
 // PublishBubbleReq 发布气泡请求。
-// 仅 InterestTag 必填；语音与定位为可选增强（老人端录音/定位权限不稳定时也能发布）。
+// 仅 InterestTag 必填；文字/语音/图片/定位均为可选。
 type PublishBubbleReq struct {
-	VoiceURL    string  `json:"voice_url"` // 本平台上传的录音 URL（可选）
 	InterestTag string  `json:"interest_tag" binding:"required"`
+	Content     string  `json:"content"`   // 文字内容（可选）
+	VoiceURL    string  `json:"voice_url"` // 本平台上传的录音 URL（可选）
+	ImageURL    string  `json:"image_url"` // 本平台上传的图片 URL（可选）
 	Province    string  `json:"province"`
 	City        string  `json:"city"`
 	Longitude   float64 `json:"longitude"`
@@ -70,9 +72,18 @@ func PublishBubble(c *gin.Context) {
 	var user model.User
 	database.DB.First(&user, userID)
 
-	// 【安全】提供了语音时才校验 URL，防止 SSRF / 任意外链
+	// 【安全】提供了语音/图片时才校验 URL，防止 SSRF / 任意外链
 	if req.VoiceURL != "" && !isValidMediaURL(req.VoiceURL) {
 		response.BadRequest(c, "语音 URL 不合法，请使用本平台上传的文件地址")
+		return
+	}
+	if req.ImageURL != "" && !isValidMediaURL(req.ImageURL) {
+		response.BadRequest(c, "图片 URL 不合法，请使用本平台上传的文件地址")
+		return
+	}
+	// 文字长度限制
+	if len([]rune(req.Content)) > 200 {
+		response.BadRequest(c, "文字内容不可超过200字")
 		return
 	}
 
@@ -81,6 +92,8 @@ func PublishBubble(c *gin.Context) {
 		Nickname:    user.Nickname,
 		AvatarURL:   user.AvatarURL,
 		VoiceURL:    req.VoiceURL,
+		Content:     req.Content,
+		ImageURL:    req.ImageURL,
 		InterestTag: req.InterestTag,
 		Province:    req.Province,
 		City:        req.City,
