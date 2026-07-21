@@ -95,8 +95,10 @@ func geocode(ctx context.Context, geoURL, city string) (lat, lon float64, name s
 	if geoURL == "" {
 		return 0, 0, "", ErrNotConfigured
 	}
+	// Open-Meteo 地理编码不认"市/省/区"等后缀，去掉后再查 (如 "武汉市" -> "武汉")
+	query := normalizeCityName(city)
 	u := fmt.Sprintf("%s/search?name=%s&count=1&language=zh&format=json",
-		strings.TrimRight(geoURL, "/"), url.QueryEscape(city))
+		strings.TrimRight(geoURL, "/"), url.QueryEscape(query))
 	var gr geoResp
 	if err := getJSON(ctx, u, &gr); err != nil {
 		return 0, 0, "", err
@@ -106,6 +108,18 @@ func geocode(ctx context.Context, geoURL, city string) (lat, lon float64, name s
 	}
 	r := gr.Results[0]
 	return r.Latitude, r.Longitude, r.Name, nil
+}
+
+// normalizeCityName 去除中文行政区划后缀，提升地理编码命中率。
+func normalizeCityName(city string) string {
+	city = strings.TrimSpace(city)
+	suffixes := []string{"特别行政区", "自治区", "自治州", "地区", "省", "市", "区", "县", "盟"}
+	for _, s := range suffixes {
+		if strings.HasSuffix(city, s) && len([]rune(city)) > len([]rune(s)) {
+			return strings.TrimSuffix(city, s)
+		}
+	}
+	return city
 }
 
 func getJSON(ctx context.Context, u string, out interface{}) error {
