@@ -46,8 +46,8 @@ storage:
 llm:
   provider: deepseek
   api_key: ""
-  base_url: "https://api.deepseek.com/v1"
-  model: "deepseek-chat"
+  base_url: "https://api.ppio.com/openai/v1"
+  model: "deepseek/deepseek-v4-flash"
   timeout_seconds: 10
 
 # 天气 (Open-Meteo, 免费无需 key)
