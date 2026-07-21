@@ -122,31 +122,18 @@ func GetNews(c *gin.Context) {
 	page := c.DefaultQuery("page", "1")
 	pageSize := c.DefaultQuery("page_size", "10")
 
-	if city == "" {
-		// 兜底：返回全国热门新闻
-		city = "全国"
-	}
-
 	ctx := context.Background()
-	cacheKey := fmt.Sprintf("news:%s:%s", city, tab)
 
-	// 1. 尝试读取 Redis 缓存 (无关键字搜索时)
-	if keyword == "" {
-		cached, err := database.RDB.Get(ctx, cacheKey).Result()
-		if err == nil && cached != "" {
-			response.OK(c, gin.H{
-				"source": "cache",
-				"city":   city,
-				"tab":    tab,
-				"data":   cached,
-			})
-			return
-		}
+	// 是否"全部"范围：city 为空、"全部"或 "all" 时不按城市过滤
+	allScope := city == "" || city == "全部" || city == "all"
+
+	// 从数据库查询新闻
+	query := database.DB.Model(&model.NewsCache{})
+	if !allScope {
+		// 本地范围：匹配所在城市，同时始终包含"全国"新闻
+		// (RSS 抓取的新闻按"全国"入库，适用于所有用户)
+		query = query.Where("city = ? OR city = ?", city, "全国")
 	}
-
-	// 2. 从数据库查询新闻：匹配所在城市，同时始终包含"全国"新闻
-	//    (RSS 抓取的新闻按"全国"入库，适用于所有用户)
-	query := database.DB.Model(&model.NewsCache{}).Where("city = ? OR city = ?", city, "全国")
 
 	if tab == "latest" {
 		query = query.Order("pub_date DESC")
