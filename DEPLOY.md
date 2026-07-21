@@ -43,8 +43,12 @@ cp .env.example .env
 | `ZAIMA_SERVER_MODE` | 生产填 `release`（`debug` 下短信验证码会直接返回，禁止用于生产） |
 | `ZAIMA_JWT_SECRET` | 换成一串足够长的随机字符串 |
 | `POSTGRES_PASSWORD` | 数据库密码，postgres 容器与后端共用此变量 |
-| `ZAIMA_LLM_API_KEY` | DeepSeek/OpenAI 兼容 Key，留空则 AI 回退规则引擎 |
+| `ZAIMA_LLM_API_KEY` | 大模型 Key，留空则 AI 回退规则引擎 |
+| `ZAIMA_LLM_BASE_URL` | 大模型接口地址（只到 `/v1`），默认 DeepSeek；换 OpenAI/通义见 `.env.example` |
+| `ZAIMA_LLM_MODEL` | 模型名，需与服务商匹配，如 `deepseek-chat` / `gpt-4o-mini` / `qwen-plus` |
 | `ZAIMA_STORAGE_PUBLIC_BASE_URL` | 自建存储对外域名，如 `https://api.你的域名.com`；暂无域名可留空 |
+
+> AI 接口地址即大模型的 `base_url`（对应 `configs/config.docker.yaml` 的 `llm.base_url`）。代码会自动在其后拼接 `/chat/completions`，所以只填到 `/v1` 即可。也可直接改 yaml 而不用环境变量。
 
 > `docker compose` 会自动读取本目录的 `.env`。`ZAIMA_*` 前缀变量会覆盖 `configs/config.docker.yaml` 中的同名项。
 
