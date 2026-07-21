@@ -51,6 +51,8 @@ services:
       ZAIMA_JWT_SECRET: ${ZAIMA_JWT_SECRET:-zaima-jwt-secret-change-in-production}
       ZAIMA_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-zaima_dev_2026}
       ZAIMA_LLM_API_KEY: ${ZAIMA_LLM_API_KEY:-}
+      ZAIMA_LLM_BASE_URL: ${ZAIMA_LLM_BASE_URL:-https://api.deepseek.com/v1}
+      ZAIMA_LLM_MODEL: ${ZAIMA_LLM_MODEL:-deepseek-chat}
       ZAIMA_STORAGE_PUBLIC_BASE_URL: ${ZAIMA_STORAGE_PUBLIC_BASE_URL:-}
     volumes:
       - uploads:/app/data/uploads   # 自建文件存储持久化 (头像/录音)
