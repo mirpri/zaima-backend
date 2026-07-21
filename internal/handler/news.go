@@ -13,6 +13,7 @@ import (
 	"zaima-backend/internal/config"
 	"zaima-backend/internal/model"
 	"zaima-backend/internal/pkg/database"
+	newsfetch "zaima-backend/internal/pkg/news"
 	"zaima-backend/internal/pkg/response"
 	"zaima-backend/internal/pkg/weather"
 )
@@ -143,13 +144,14 @@ func GetNews(c *gin.Context) {
 		}
 	}
 
-	// 2. 从数据库查询缓存的新闻
-	query := database.DB.Model(&model.NewsCache{}).Where("city = ?", city)
+	// 2. 从数据库查询新闻：匹配所在城市，同时始终包含"全国"新闻
+	//    (RSS 抓取的新闻按"全国"入库，适用于所有用户)
+	query := database.DB.Model(&model.NewsCache{}).Where("city = ? OR city = ?", city, "全国")
 
 	if tab == "latest" {
 		query = query.Order("pub_date DESC")
-	} else if tab == "hot" {
-		query = query.Order("created_at DESC") // 热点按抓取时间降序
+	} else {
+		query = query.Order("created_at DESC") // 默认/热点按抓取时间倒序
 	}
 
 	if keyword != "" {
@@ -170,12 +172,15 @@ func GetNews(c *gin.Context) {
 	query.Offset((pageNum - 1) * pageSz).Limit(pageSz).Find(&news)
 
 	if len(news) == 0 {
-		// 新闻由后台 cron 定时从 RSS 源抓取入库，此处直接返回空 + 提示
+		// 库里还没有新闻：异步触发一次 RSS 抓取（带 Redis 锁防并发），下次刷新即可看到
+		if locked, _ := database.RDB.SetNX(ctx, "news:fetching", "1", 2*time.Minute).Result(); locked {
+			go newsfetch.FetchAll(context.Background())
+		}
 		response.OK(c, gin.H{
 			"city":    city,
 			"tab":     tab,
 			"data":    []interface{}{},
-			"message": "暂无新闻，正在为您抓取最新资讯...",
+			"message": "正在为您抓取最新资讯，请稍后下拉刷新~",
 		})
 		return
 	}
